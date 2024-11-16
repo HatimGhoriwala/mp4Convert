@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebM to MP4 Converter</title>
+    <!-- Using the correct FFmpeg.wasm files -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <style>
+        body {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        .container {
+            text-align: center;
+        }
+        #convertButton {
+            padding: 10px 20px;
+            margin: 10px 0;
+        }
+        #videoPlayer {
+            max-width: 100%;
+            margin-top: 20px;
+        }
+        .status {
+            margin: 10px 0;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebM to MP4 Converter</h1>
+        <input type="file" id="fileInput" accept=".webm">
+        <br><br>
+        <button id="convertButton" disabled>Convert to MP4</button>
+        <div class="status" id="status"></div>
+        <br>
+        <video id="videoPlayer" controls></video>
+    </div>
+
+    <script>
+        // Initialize FFmpeg
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        const ffmpeg = createFFmpeg({
+            log: true,
+            progress: ({ ratio }) => {
+                statusDiv.textContent = `Converting: ${(ratio * 100).toFixed(0)}%`;
+            }
+        });
+        
+        // Get DOM elements
+        const fileInput = document.getElementById('fileInput');
+        const convertButton = document.getElementById('convertButton');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const statusDiv = document.getElementById('status');
+        
+        let videoBlob;
+
+        // Load FFmpeg when the page loads
+        (async function loadFFmpeg() {
+            try {
+                await ffmpeg.load();
+                statusDiv.textContent = 'FFmpeg loaded successfully';
+            } catch (err) {
+                statusDiv.textContent = 'Failed to load FFmpeg: ' + err.message;
+                console.error('FFmpeg load error:', err);
+            }
+        })();
+
+        // When a file is selected
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file && file.type === 'video/webm') {
+                // Enable the convert button
+                convertButton.disabled = false;
+                statusDiv.textContent = 'WebM file selected';
+
+                // Preview the selected video
+                const url = URL.createObjectURL(file);
+                videoPlayer.src = url;
+                videoBlob = file;
+            } else {
+                statusDiv.textContent = 'Please select a valid WebM file!';
+                convertButton.disabled = true;
+                videoPlayer.src = '';
+            }
+        });
+
+        // Convert to MP4 when the button is clicked
+        convertButton.addEventListener('click', async () => {
+            if (!videoBlob) return;
+
+            try {
+                // Disable the button and update status
+                convertButton.disabled = true;
+                statusDiv.textContent = 'Starting conversion...';
+
+                // Convert the blob to ArrayBuffer
+                const fileData = await videoBlob.arrayBuffer();
+                
+                // Write the WebM file to FFmpeg's virtual filesystem
+                ffmpeg.FS('writeFile', 'input.webm', new Uint8Array(fileData));
+
+                // Run the FFmpeg command
+                await ffmpeg.run(
+                    '-i', 'input.webm',     // Input file
+                    '-c:v', 'libx264',      // Video codec
+                    '-c:a', 'aac',          // Audio codec
+                    '-movflags', '+faststart', // Allow fast start of video
+                    'output.mp4'            // Output file
+                );
+
+                // Read the output file from the virtual filesystem
+                const data = ffmpeg.FS('readFile', 'output.mp4');
+                const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
+
+                // Create a download link for the MP4 file
+                const mp4URL = URL.createObjectURL(mp4Blob);
+                const downloadLink = document.createElement('a');
+                downloadLink.href = mp4URL;
+                downloadLink.download = 'converted_video.mp4';
+                document.body.appendChild(downloadLink);
+                downloadLink.click();
+                document.body.removeChild(downloadLink);
+
+                // Cleanup
+                URL.revokeObjectURL(mp4URL);
+                ffmpeg.FS('unlink', 'input.webm');
+                ffmpeg.FS('unlink', 'output.mp4');
+                statusDiv.textContent = 'Conversion completed!';
+            } catch (error) {
+                statusDiv.textContent = 'Error during conversion: ' + error.message;
+                console.error('Conversion error:', error);
+            } finally {
+                convertButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
